@@ -1,0 +1,74 @@
+[meta]
+name = "Matte Black"
+description = "Matte black theme inspired by Omarchy Matte Black"
+variant = "dark"
+inherits = "vicinae-dark"
+
+[colors.core]
+accent = "#f59e0b"
+accent_foreground = "#ffffff"
+background = "#121212"
+foreground = "#bebebe"
+secondary_background = "#333333"
+border = "#333333"
+
+[colors.main_window]
+border = "#333333"
+
+[colors.settings_window]
+border = "#333333"
+
+[colors.accents]
+blue = "#e68e0d"
+green = "#FFC107"
+magenta = "#D35F5F"
+orange = "#f59e0b"
+red = "#B91C1C"
+yellow = "#b90a0a"
+cyan = "#eaeaea"
+purple = "#D35F5F"
+
+[colors.text]
+default = "#bebebe"
+muted = "#8a8a8d"
+danger = "#B91C1C"
+success = "#FFC107"
+placeholder = "#8a8a8d"
+selection = { background = "#333333", foreground = "#bebebe" }
+
+[colors.text.links]
+default = "#e68e0d"
+visited = "#f59e0b"
+
+[colors.input]
+border = "#333333"
+border_focus = "#f59e0b"
+border_error = "#B91C1C"
+
+[colors.button.primary]
+background = "#333333"
+foreground = "#bebebe"
+hover = { background = "#8a8a8d" }
+focus = { outline = "colors.core.accent" }
+
+[colors.list.item.hover]
+background = "#333333"
+foreground = "#bebebe"
+
+[colors.list.item.selection]
+background = "#333333"
+foreground = "#bebebe"
+secondary_background = "#8a8a8d"
+secondary_foreground = "#bebebe"
+
+[colors.grid.item]
+background = "#333333"
+hover = { outline = "#bebebe" }
+selection = { outline = "#bebebe" }
+
+[colors.scrollbars]
+background = "#333333"
+
+[colors.loading]
+bar = "#bebebe"
+spinner = "#bebebe"
