@@ -42,4 +42,4 @@ alias rip="expac --timefmt='%Y-%m-%d %T' '%l\t%n %v' | sort | tail -200 | nl"
 
 # fzf alias for pacman and yaru
 alias pacfind="pacman -Slq | fzf --multi --preview 'pacman -Si {1}' | xargs -ro sudo pacman -S"
-alias yayfind="paru -Slq | fzf --multi --preview 'paru -Si {1}' | xargs -ro paru -S"
+alias parfind="paru -Slq | fzf --multi --preview 'paru -Si {1}' | xargs -ro paru -S"
