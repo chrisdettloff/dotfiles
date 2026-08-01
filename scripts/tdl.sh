@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+###############################################################################
+# tmux development launcher
+#
+# Layout with one agent:
+#
+#   ┌────────────────────────┬──────────────────┐
+#   │                        │                  │
+#   │       Neovim           │      Agent       │
+#   │                        │                  │
+#   ├────────────────────────┴──────────────────┤
+#   │                  Shell                    │
+#   └───────────────────────────────────────────┘
+#
+# Layout with two agents:
+#
+#   ┌────────────────────────┬──────────────────┐
+#   │                        │     Agent 1      │
+#   │       Neovim           ├──────────────────┤
+#   │                        │     Agent 2      │
+#   ├────────────────────────┴──────────────────┤
+#   │                  Shell                    │
+#   └───────────────────────────────────────────┘
+###############################################################################
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tdl [agent]
+  tdl [agent-1] [agent-2]
+  tdl --new [agent]
+  tdl --kill [agent]
+  tdl --list
+  tdl --help
+
+Supported agents:
+  opencode    aliases: o, oc
+  agy         aliases: a, antigravity
+  codex       aliases: c, cx
+  claude      aliases: cl, cc, claude-code
+  shell       aliases: sh, none
+
+Examples:
+  tdl opencode
+  tdl agy
+  tdl codex
+  tdl claude
+
+  tdl opencode claude
+  tdl codex agy
+
+  tdl --new claude
+  tdl --kill codex
+  tdl --list
+
+Behavior:
+  Sessions are named using the current project directory and selected agents.
+
+  Examples:
+    my-project-opencode
+    my-project-codex
+    my-project-claude
+    my-project-opencode-claude
+
+  Running the same command again reconnects to that session.
+EOF
+}
+
+die() {
+  printf 'tdl: %s\n' "$*" >&2
+  exit 1
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+require_command() {
+  command_exists "$1" || die "required command not found: $1"
+}
+
+sanitize_name() {
+  local value="$1"
+
+  # Replace characters that are awkward or invalid in tmux session names.
+  value="${value//./-}"
+  value="${value//:/-}"
+  value="${value// /-}"
+  value="${value//\//-}"
+
+  # Keep only letters, numbers, underscores, and hyphens.
+  value="$(printf '%s' "$value" | tr -cd '[:alnum:]_-')"
+
+  [[ -n "$value" ]] || value="project"
+
+  printf '%s' "$value"
+}
+
+normalize_agent() {
+  case "${1:-shell}" in
+    o | oc | opencode)
+      printf '%s' "opencode"
+      ;;
+
+    a | agy | antigravity)
+      printf '%s' "agy"
+      ;;
+
+    c | cx | codex)
+      printf '%s' "codex"
+      ;;
+
+    cl | cc | claude | claude-code)
+      printf '%s' "claude"
+      ;;
+
+    sh | shell | none | "")
+      printf '%s' "shell"
+      ;;
+
+    *)
+      die "unknown agent: $1"
+      ;;
+  esac
+}
+
+agent_command() {
+  case "$1" in
+    opencode)
+      printf '%s' "opencode"
+      ;;
+
+    agy)
+      printf '%s' "agy"
+      ;;
+
+    codex)
+      printf '%s' "codex"
+      ;;
+
+    claude)
+      printf '%s' "claude"
+      ;;
+
+    shell)
+      printf '%s' "${SHELL:-bash}"
+      ;;
+
+    *)
+      die "no command configured for agent: $1"
+      ;;
+  esac
+}
+
+validate_launch_command() {
+  local agent="$1"
+  local launch_command="$2"
+  local executable="${launch_command%% *}"
+
+  if ! command_exists "$executable"; then
+    cat >&2 <<EOF
+tdl: command for '$agent' was not found: $executable
+
+Install the corresponding CLI or update agent_command() in:
+  ~/.local/bin/tdl
+EOF
+    exit 1
+  fi
+}
+
+attach_or_switch() {
+  local session="$1"
+
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "=$session"
+  else
+    tmux attach-session -t "=$session"
+  fi
+}
+
+send_command() {
+  local target="$1"
+  local launch_command="$2"
+
+  tmux send-keys -t "$target" "$launch_command" Enter
+}
+
+###############################################################################
+# Argument handling
+###############################################################################
+
+force_new=false
+kill_only=false
+
+case "${1:-}" in
+  -h | --help | help)
+    usage
+    exit 0
+    ;;
+
+  -l | --list)
+    tmux list-sessions 2>/dev/null || printf 'No tmux sessions found.\n'
+    exit 0
+    ;;
+
+  --new)
+    force_new=true
+    shift
+    ;;
+
+  --kill)
+    kill_only=true
+    shift
+    ;;
+esac
+
+if (( $# > 2 )); then
+  usage >&2
+  exit 1
+fi
+
+require_command tmux
+
+###############################################################################
+# Resolve project, editor, and agents
+###############################################################################
+
+project_directory="$PWD"
+project_name="$(sanitize_name "$(basename "$project_directory")")"
+
+editor_command="${EDITOR:-nvim}"
+editor_executable="${editor_command%% *}"
+
+require_command "$editor_executable"
+
+primary_agent="$(normalize_agent "${1:-shell}")"
+primary_command="$(agent_command "$primary_agent")"
+
+secondary_agent=""
+secondary_command=""
+
+if (( $# == 2 )); then
+  secondary_agent="$(normalize_agent "$2")"
+  secondary_command="$(agent_command "$secondary_agent")"
+fi
+
+validate_launch_command "$primary_agent" "$primary_command"
+
+if [[ -n "$secondary_agent" ]]; then
+  validate_launch_command "$secondary_agent" "$secondary_command"
+fi
+
+###############################################################################
+# Build an agent-specific session name
+###############################################################################
+
+if [[ -n "$secondary_agent" ]]; then
+  session_name="$project_name-$primary_agent-$secondary_agent"
+else
+  session_name="$project_name-$primary_agent"
+fi
+
+session_name="$(sanitize_name "$session_name")"
+
+###############################################################################
+# Kill mode
+###############################################################################
+
+if [[ "$kill_only" == true ]]; then
+  if tmux has-session -t "=$session_name" 2>/dev/null; then
+    tmux kill-session -t "=$session_name"
+    printf 'Killed tmux session: %s\n' "$session_name"
+  else
+    printf 'No tmux session exists named: %s\n' "$session_name"
+  fi
+
+  exit 0
+fi
+
+###############################################################################
+# Existing-session behavior
+###############################################################################
+
+if tmux has-session -t "=$session_name" 2>/dev/null; then
+  if [[ "$force_new" == true ]]; then
+    tmux kill-session -t "=$session_name"
+  else
+    attach_or_switch "$session_name"
+    exit 0
+  fi
+fi
+
+###############################################################################
+# Create the tmux session and layout
+###############################################################################
+
+# Create the initial pane. This will become the editor.
+tmux new-session \
+  -d \
+  -s "$session_name" \
+  -n development \
+  -c "$project_directory"
+
+editor_pane="$session_name:development.0"
+
+# Split off the bottom shell first, allowing it to span the full width.
+shell_pane="$(
+  tmux split-window \
+    -v \
+    -p 25 \
+    -t "$editor_pane" \
+    -c "$project_directory" \
+    -P \
+    -F '#{pane_id}'
+)"
+
+# Split the upper editor area into editor and agent columns.
+primary_agent_pane="$(
+  tmux split-window \
+    -h \
+    -p 40 \
+    -t "$editor_pane" \
+    -c "$project_directory" \
+    -P \
+    -F '#{pane_id}'
+)"
+
+secondary_agent_pane=""
+
+if [[ -n "$secondary_agent" ]]; then
+  # Split the right-hand agent column into upper and lower agents.
+  secondary_agent_pane="$(
+    tmux split-window \
+      -v \
+      -p 50 \
+      -t "$primary_agent_pane" \
+      -c "$project_directory" \
+      -P \
+      -F '#{pane_id}'
+  )"
+fi
+
+###############################################################################
+# Launch applications
+###############################################################################
+
+send_command "$editor_pane" "$editor_command"
+send_command "$primary_agent_pane" "$primary_command"
+
+if [[ -n "$secondary_agent_pane" ]]; then
+  send_command "$secondary_agent_pane" "$secondary_command"
+fi
+
+# The bottom pane already contains the user's default shell.
+tmux select-pane -t "$editor_pane"
+
+# Give tmux a useful status message.
+tmux display-message \
+  -t "$session_name" \
+  "Session: $session_name"
+
+###############################################################################
+# Connect to the session
+###############################################################################
+
+attach_or_switch "$session_name"
