@@ -1,0 +1,373 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tsl <pane-count> <command> [arguments...]
+  tsl <command-1> <command-2> [command ...]
+  tsl [options] <command> [command ...]
+
+Options:
+  -n, --name NAME       Name the swarm window
+  -s, --session NAME    Name the tmux session
+  -c, --count N         Repeat one command N times
+  -d, --directory DIR   Working directory for all panes
+      --new-session     Create a unique new session
+      --replace-window  Replace a window with the same name
+      --no-attach       Create without attaching
+  -h, --help            Show help
+
+Agent aliases:
+  c, oc, opencode            opencode
+  cl, cc, claude             claude
+  cd, codex                  codex
+  a, agy, antigravity        agy
+  sh, shell                  default shell
+
+Examples:
+  tsl 4 codex
+  tsl --count 4 codex
+  tsl codex claude opencode agy
+  tsl --name review codex claude
+  tsl "npm test" "npm run lint" "git status"
+EOF
+}
+
+die() {
+  printf 'tsl: %s\n' "$*" >&2
+  exit 1
+}
+
+sanitize_name() {
+  local value="$1"
+
+  value="${value//./-}"
+  value="${value//:/-}"
+  value="${value// /-}"
+  value="${value//\//-}"
+  value="$(printf '%s' "$value" | tr -cd '[:alnum:]_-')"
+
+  [[ -n "$value" ]] || value="swarm"
+
+  printf '%s' "$value"
+}
+
+normalize_command() {
+  case "$1" in
+    c|oc|opencode)
+      printf '%s' "opencode"
+      ;;
+    cl|cc|claude|claude-code)
+      printf '%s' "claude"
+      ;;
+    cd|codex)
+      printf '%s' "codex"
+      ;;
+    a|agy|antigravity)
+      printf '%s' "agy"
+      ;;
+    sh|shell)
+      printf '%s' "${SHELL:-bash}"
+      ;;
+    *)
+      printf '%s' "$1"
+      ;;
+  esac
+}
+
+session_exists() {
+  tmux has-session -t "=$1" 2>/dev/null
+}
+
+window_exists() {
+  local session="$1"
+  local window="$2"
+
+  tmux list-windows -t "$session" -F '#W' 2>/dev/null |
+    grep -Fxq "$window"
+}
+
+unique_session_name() {
+  local base="$1"
+  local candidate="$base"
+  local number=2
+
+  while session_exists "$candidate"; do
+    candidate="${base}-${number}"
+    ((number++))
+  done
+
+  printf '%s' "$candidate"
+}
+
+unique_window_name() {
+  local session="$1"
+  local base="$2"
+  local candidate="$base"
+  local number=2
+
+  while window_exists "$session" "$candidate"; do
+    candidate="${base}-${number}"
+    ((number++))
+  done
+
+  printf '%s' "$candidate"
+}
+
+attach_session() {
+  local session="$1"
+
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "=$session"
+  else
+    tmux attach-session -t "=$session"
+  fi
+}
+
+window_name=""
+session_name=""
+pane_count=""
+working_directory="$PWD"
+new_session=false
+replace_window=false
+no_attach=false
+
+while (( $# > 0 )); do
+  case "$1" in
+    -n|--name)
+      (( $# >= 2 )) || die "$1 requires a value"
+      window_name="$2"
+      shift 2
+      ;;
+
+    -s|--session)
+      (( $# >= 2 )) || die "$1 requires a value"
+      session_name="$2"
+      shift 2
+      ;;
+
+    -c|--count)
+      (( $# >= 2 )) || die "$1 requires a value"
+      pane_count="$2"
+      shift 2
+      ;;
+
+    -d|--directory)
+      (( $# >= 2 )) || die "$1 requires a value"
+      working_directory="$2"
+      shift 2
+      ;;
+
+    --new-session)
+      new_session=true
+      shift
+      ;;
+
+    --replace-window)
+      replace_window=true
+      shift
+      ;;
+
+    --no-attach)
+      no_attach=true
+      shift
+      ;;
+
+    --)
+      shift
+      break
+      ;;
+
+    -h|--help)
+      usage
+      exit 0
+      ;;
+
+    -*)
+      die "unknown option: $1"
+      ;;
+
+    *)
+      break
+      ;;
+  esac
+done
+
+command -v tmux >/dev/null 2>&1 ||
+  die "tmux is not installed"
+
+[[ -d "$working_directory" ]] ||
+  die "directory does not exist: $working_directory"
+
+working_directory="$(cd "$working_directory" && pwd)"
+
+# Support original Omarchy-style syntax:
+#
+#   tsl 4 codex
+#
+if [[ -z "$pane_count" ]] &&
+   [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]; then
+  pane_count="$1"
+  shift
+fi
+
+(( $# >= 1 )) || {
+  usage >&2
+  exit 1
+}
+
+if [[ -n "$pane_count" ]]; then
+  [[ "$pane_count" =~ ^[1-9][0-9]*$ ]] ||
+    die "pane count must be a positive integer"
+
+  (( pane_count <= 64 )) ||
+    die "pane count must be 64 or fewer"
+
+  (( $# >= 1 )) ||
+    die "no command provided"
+fi
+
+raw_commands=("$@")
+commands=()
+
+if [[ -n "$pane_count" ]]; then
+  command_string="$(normalize_command "${raw_commands[0]}")"
+
+  if (( ${#raw_commands[@]} > 1 )); then
+    printf -v remaining ' %q' "${raw_commands[@]:1}"
+    command_string+="$remaining"
+  fi
+
+  for ((index = 0; index < pane_count; index++)); do
+    commands+=("$command_string")
+  done
+else
+  for command_string in "${raw_commands[@]}"; do
+    commands+=("$(normalize_command "$command_string")")
+  done
+fi
+
+project_name="$(sanitize_name "$(basename "$working_directory")")"
+
+if [[ -z "$session_name" ]]; then
+  session_name="$project_name"
+else
+  session_name="$(sanitize_name "$session_name")"
+fi
+
+if [[ -z "$window_name" ]]; then
+  if (( ${#commands[@]} == 1 )); then
+    first_command="${commands[0]%% *}"
+    window_name="swarm-${first_command}"
+  else
+    window_name="swarm"
+  fi
+fi
+
+window_name="$(sanitize_name "$window_name")"
+
+outside_tmux=false
+
+if [[ -z "${TMUX:-}" ]]; then
+  outside_tmux=true
+fi
+
+if [[ "$outside_tmux" == true ]]; then
+  if [[ "$new_session" == true ]]; then
+    session_name="$(unique_session_name "$session_name")"
+  fi
+
+  if ! session_exists "$session_name"; then
+    tmux new-session \
+      -d \
+      -s "$session_name" \
+      -n bootstrap \
+      -c "$working_directory"
+  fi
+else
+  session_name="$(tmux display-message -p '#S')"
+fi
+
+if [[ "$replace_window" == true ]]; then
+  if window_exists "$session_name" "$window_name"; then
+    tmux kill-window -t "${session_name}:${window_name}"
+  fi
+else
+  window_name="$(unique_window_name "$session_name" "$window_name")"
+fi
+
+first_pane="$(
+  tmux new-window \
+    -d \
+    -P \
+    -F '#{pane_id}' \
+    -t "$session_name" \
+    -n "$window_name" \
+    -c "$working_directory"
+)"
+
+window_id="$(
+  tmux display-message \
+    -p \
+    -t "$first_pane" \
+    '#{window_id}'
+)"
+
+panes=("$first_pane")
+
+while (( ${#panes[@]} < ${#commands[@]} )); do
+  new_pane="$(
+    tmux split-window \
+      -h \
+      -t "${panes[-1]}" \
+      -c "$working_directory" \
+      -P \
+      -F '#{pane_id}'
+  )"
+
+  panes+=("$new_pane")
+
+  tmux select-layout \
+    -t "$window_id" \
+    tiled
+done
+
+tmux select-layout \
+  -t "$window_id" \
+  tiled
+
+for index in "${!commands[@]}"; do
+  tmux send-keys \
+    -t "${panes[$index]}" \
+    -l \
+    "${commands[$index]}"
+
+  tmux send-keys \
+    -t "${panes[$index]}" \
+    Enter
+done
+
+tmux select-pane -t "${panes[0]}"
+
+if [[ "$outside_tmux" == true ]] &&
+   window_exists "$session_name" bootstrap; then
+  tmux kill-window \
+    -t "${session_name}:bootstrap" \
+    2>/dev/null || true
+fi
+
+printf 'Created swarm %s:%s with %d panes\n' \
+  "$session_name" \
+  "$window_name" \
+  "${#commands[@]}"
+
+if [[ "$no_attach" == false ]]; then
+  tmux select-window \
+    -t "${session_name}:${window_name}"
+
+  if [[ "$outside_tmux" == true ]]; then
+    attach_session "$session_name"
+  fi
+fi
