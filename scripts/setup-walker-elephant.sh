@@ -18,6 +18,17 @@ if ((EUID == 0)); then
   die "run this script as your regular desktop user, not as root"
 fi
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+walker_config_source="$script_dir/../walker"
+walker_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/walker"
+
+[[ -d "$walker_config_source" ]] || die "Walker config directory is missing: $walker_config_source"
+
+walker_config_source="$(cd -- "$walker_config_source" && pwd -P)"
+mkdir -p "$walker_config_dir"
+cp -a "$walker_config_source/." "$walker_config_dir/"
+note "Installed Walker config to $walker_config_dir"
+
 command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 
 walker_bin="$(command -v walker || true)"
