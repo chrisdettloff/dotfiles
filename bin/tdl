@@ -41,6 +41,7 @@ Supported agents:
   agy         aliases: a, antigravity
   codex       aliases: c, cx
   claude      aliases: cl, cc, claude-code
+  grok        aliases: g
   shell       aliases: sh, none
 
 Examples:
@@ -48,6 +49,7 @@ Examples:
   tdl agy
   tdl codex
   tdl claude
+  tdl grok
 
   tdl opencode claude
   tdl codex agy
@@ -117,6 +119,10 @@ normalize_agent() {
       printf '%s' "claude"
       ;;
 
+    g | grok)
+      printf '%s' "grok"
+      ;;
+
     sh | shell | none | "")
       printf '%s' "shell"
       ;;
@@ -143,6 +149,10 @@ agent_command() {
 
     claude)
       printf '%s' "claude"
+      ;;
+
+    grok)
+      printf '%s' "grok"
       ;;
 
     shell)

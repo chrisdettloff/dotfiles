@@ -24,12 +24,14 @@ Agent aliases:
   cl, cc, claude             claude
   cd, codex                  codex
   a, agy, antigravity        agy
+  g, grok                    grok
   sh, shell                  default shell
 
 Examples:
   tsl 4 codex
   tsl --count 4 codex
   tsl codex claude opencode agy
+  tsl --count 4 grok
   tsl --name review codex claude
   tsl "npm test" "npm run lint" "git status"
 EOF
@@ -67,6 +69,9 @@ normalize_command() {
       ;;
     a|agy|antigravity)
       printf '%s' "agy"
+      ;;
+    g|grok)
+      printf '%s' "grok"
       ;;
     sh|shell)
       printf '%s' "${SHELL:-bash}"
