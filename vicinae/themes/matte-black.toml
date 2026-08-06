@@ -1,0 +1,23 @@
+[meta]
+version = 1
+name = "Matte Black"
+description = "A low-gloss black theme with warm amber focus accents."
+variant = "dark"
+inherits = "vicinae-dark"
+
+[colors.core]
+background = "#121212"
+foreground = "#E8E8E8"
+secondary_background = "#1B1B1B"
+border = "#2B2B2B"
+accent = "#D97706"
+
+[colors.accents]
+blue = "#60A5FA"
+green = "#4ADE80"
+magenta = "#E879F9"
+orange = "#FB923C"
+purple = "#A78BFA"
+red = "#F87171"
+yellow = "#FACC15"
+cyan = "#22D3EE"
